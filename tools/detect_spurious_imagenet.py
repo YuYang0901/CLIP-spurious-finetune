@@ -22,14 +22,17 @@ os.environ["CUDA_VISIBLE_DEVICES"] = device_str
 
 print('Devices: ', device_str)
 
+import clip
 import datasets
 
 datasets.logging.set_verbosity(datasets.logging.ERROR)
 import json
 
 import numpy as np
+import pandas as pd
 import torch
 from datasets import load_dataset
+from sklearn.metrics import mutual_info_score
 from torch.utils.data import Dataset
 from transformers import OwlViTForObjectDetection, OwlViTProcessor
 
@@ -158,7 +161,8 @@ def detect_imagenet_class(class_idx=516, score_threshold=0.1):
             
             detect[i, objs] = 1
 
-    np.save(os.path.join(config.save_dir, f'detect_{config.split}_class{class_idx}_{config.model}_threshold{config.score_threshold}.npy'), detect)
+    os.makedirs(os.path.join(config.save_dir, f'detect/{config.split}'), exist_ok=True)
+    np.save(os.path.join(config.save_dir, f'detect/{config.split}/class{class_idx}_{config.model}_threshold{config.score_threshold}.npy'), detect)
     
 class ImageNetSubset(Dataset):
     def __init__(self, imagenet_path, class_index, transform):
@@ -193,13 +197,112 @@ class ImageNetSubset(Dataset):
         return image, label_index, index
     
 
+def zeroshot_classifier(classnames, templates):
+    with torch.no_grad():
+        zeroshot_weights = []
+        for classname in classnames:
+            texts = [template.format(classname) for template in templates] #format with class
+            texts = clip.tokenize(texts).cuda() #tokenize
+            class_embeddings = model.encode_text(texts) #embed with text encoder
+            class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True)
+            class_embedding = class_embeddings.mean(dim=0)
+            class_embedding /= class_embedding.norm()
+            zeroshot_weights.append(class_embedding)
+        zeroshot_weights = torch.stack(zeroshot_weights, dim=1).cuda()
+    return zeroshot_weights
+    
+
 class_indices = np.arange(config.class_rank_range[0], config.class_rank_range[1])
 for i, class_idx in enumerate(class_indices):
-    detect_path = os.path.join(config.save_dir, f'detect_{config.split}_class{class_idx}_{config.model}_threshold{config.score_threshold}.npy')
+    detect_path = os.path.join(config.save_dir, f'detect/{config.split}/class{class_idx}_{config.model}_threshold{config.score_threshold}.npy')
     if os.path.exists(detect_path):
         detect = np.load(detect_path)
-        if np.shape(detect)[1] < 10000:
-            continue
     print(f"Detecting class {class_idx}...")
     detect_imagenet_class(class_idx=class_idx, score_threshold=config.score_threshold)
 
+model, preprocess = clip.load(config.model)
+weight_path = os.path.join(config.data_dir, f'clip_zeroshot_weights_{config.model}_{config.split}.pt')
+if not os.path.exists(weight_path):
+    print(f"Calculating zero-shot weights...")
+    zeroshot_weights = zeroshot_classifier(imagenet_classes, imagenet_templates)
+    torch.save(zeroshot_weights, weight_path)
+else:
+    zeroshot_weights = torch.load(weight_path)
+
+for class_idx in class_indices:
+    if not os.path.exists(os.path.join(config.save_dir, f'correct/{config.split}/class{class_idx}_{config.model}.npy')):
+        print(f"Evaluating class {class_idx}...")
+        class_images = ImageNetSubset(config.data_dir, class_idx, preprocess)
+        loader = torch.utils.data.DataLoader(class_images, batch_size=32, num_workers=2)
+        correct = np.zeros(len(class_images))
+
+        with torch.no_grad():
+
+            for _, (images, target, indices) in enumerate(loader):
+                images = images.cuda()
+                target = target.cuda()
+                
+                # predict
+                image_features = model.encode_image(images)
+                image_features /= image_features.norm(dim=-1, keepdim=True)
+                logits = 100. * image_features @ zeroshot_weights
+
+                preds = torch.argmax(logits, dim=-1)
+                acc = preds.eq(target).float().detach().cpu().numpy()
+
+                correct[indices] = acc
+        
+        print(f"Class {class_idx}: {imagenet_classes[class_idx]}")
+        os.makedirs(os.path.join(config.save_dir, f'correct/{config.split}'), exist_ok=True)
+        np.save(os.path.join(config.save_dir, f'correct/{config.split}/class{class_idx}_{config.model}.npy'), correct)
+
+
+if config.compute_mi:
+    print(f"Calculating mutual information...")
+    mi_df = pd.DataFrame(columns=['class_index', 'class_name', 'attribute', 'attr_count', 'mi', 'acc', 'acc_attr_0', 'acc_attr_1', 'acc_diff'])
+    for class_idx in class_indices:
+        print(f"Class {class_idx}: {imagenet_classes[class_idx]}")
+        mi_df_class = pd.DataFrame(columns=['class_index', 'class_name', 'attribute', 'attr_count', 'mi', 'acc', 'acc_attr_0', 'acc_attr_1', 'acc_diff'])
+        try:
+            detect = np.load(os.path.join(config.save_dir, f'detect/{config.split}/class{class_idx}_{config.model}_threshold{config.score_threshold}.npy'))
+            correct = np.load(os.path.join(config.save_dir, f'correct/{config.split}/class{class_idx}_{config.model}.npy'))
+        except:
+            continue
+
+        error = 1 - correct
+        attr_indices = np.where(np.sum(detect, axis=0) > 0)[0]
+        for i in attr_indices:
+            if config.object_only and (i < (len(vocab) - len(objects))):
+                continue
+            word = vocab[i]
+            if word in imagenet_classes:
+                continue
+            if np.sum(detect[:, i]) < config.min_detect:
+                continue
+            mi = mutual_info_score(detect[:, i], error)
+            if mi > 0:
+                mi_df_class = pd.concat([mi_df_class, pd.DataFrame({
+                    'class_index': class_idx, 
+                    'class_name': imagenet_classes[class_idx], 
+                    'attribute': word, 
+                    'attr_count': np.sum(detect[:, i]), 
+                    'mi': mi,
+                    'acc': np.mean(correct), 
+                    'acc_attr_0': np.mean(correct[detect[:, i] == 0]), 
+                    'acc_attr_1': np.mean(correct[detect[:, i] == 1]), 
+                    'acc_diff': np.mean(correct[detect[:, i] == 1]) - np.mean(correct[detect[:, i] == 0])
+                    }, index=[0])], ignore_index=True)
+
+        mi_df_class = mi_df_class.sort_values(by=['mi'], ascending=False)
+        print(mi_df_class.head())
+
+        mi_df = pd.concat([mi_df, mi_df_class.iloc[:config.log_attr_per_class]], ignore_index=True)
+
+    mi_df = mi_df.sort_values(by=['acc_diff'], ascending=False)
+    os.makedirs(os.path.join(config.save_dir, f'mi/{config.split}'), exist_ok=True)
+    if config.object_only:
+        mi_df.to_csv(os.path.join(config.save_dir, f'mi/{config.split}/{config.model}_{config.score_threshold}_object.csv'))
+    else:
+        mi_df.to_csv(os.path.join(config.save_dir, f'mi/{config.split}/{config.model}_{config.score_threshold}.csv'))
+
+print('Finish!')
