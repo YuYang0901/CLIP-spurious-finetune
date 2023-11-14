@@ -64,7 +64,7 @@ rm attribute_synsets.json.zip
 
 2. Launch the spurious detection for a range of classes with multiple GPUs:
 ```
-python tools/detection_command_launchers.py --device 0 1 3 4 --class_range 0 100 --output_dir detection_runs
+python tools/detection_command_launchers.py --device 0 1 3 4 --class_rank_range 0 100 --output_dir detection_runs
 ```
 
 ### Evaluate the pre-trained models
@@ -86,7 +86,7 @@ python run_expt.py  --dataset waterbirds --algorithm Multimodal --model clip-rn5
 ## Citation
 If you find this repository useful, please cite our paper:
 ```
-@inproceedings{yu2023mitigating,
+@inproceedings{yang2023mitigating,
   title={Mitigating Spurious Correlations in Multi-modal Models during Fine-tuning},
   author={Yang, Yu and Nushi, Besmira and Palangi, Hamid and Mirzasoleiman, Baharan},
   booktitle={International Conference on Machine Learning},

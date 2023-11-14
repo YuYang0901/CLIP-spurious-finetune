@@ -138,7 +138,7 @@ def make_args_list(args):
     for class_idx_start in np.arange(args.class_rank_range[0], args.class_rank_range[1], args.num_classes):
         train_args = {}
         train_args['split'] = args.split
-        train_args['class_range'] = [str(class_idx_start), str(class_idx_start+args.num_classes)]
+        train_args['class_rank_range'] = [str(class_idx_start), str(class_idx_start+args.num_classes)]
         args_list.append(train_args)
     return args_list
 
