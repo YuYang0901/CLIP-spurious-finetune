@@ -73,10 +73,29 @@ python run_expt.py --dataset waterbirds --algorithm ERM --model clip-vit --root_
 ```
 
 ### Train the models
+
+#### Waterbirds, ResNet-50 backbone
+- $L_{lc}+L_{vc}+L_{ls}$
+```
+python run_expt.py  --dataset waterbirds --algorithm Multimodal --model clip-rn50 --root_dir data --device 0 --freeze_language --freeze_vision --train_projection --seed 11111111 --batch_size 128 --n_epochs 300 --class_weight 0 --clip_weight 1.0 --image_weight 1.0 --language_weight 1.0 --domain_weight 0.0 --spurious_weight 1.0 --spurious_class_weight 0.0 --spurious_clip_weight 0.0 --crossmodal_weight 0.0 --pos_weight 1.0 --neg_weight 1.0 --weight_decay 1e-5 --lr 1e-4 --use_wandb --download=True
+```
+
+- $L_{lc}+L_{vc}+L_{vs}$
 ```
 python run_expt.py  --dataset waterbirds --algorithm Multimodal --model clip-rn50 --root_dir data --device 0 --freeze_language --freeze_vision --train_projection --seed 11111111 --batch_size 128 --n_epochs 300 --class_weight 0 --clip_weight 1.0 --image_weight 1.0 --language_weight 1.0 --domain_weight 0.0 --spurious_weight 0.0 --spurious_class_weight 1.0 --spurious_clip_weight 0.0 --crossmodal_weight 0.0 --pos_weight 1.0 --neg_weight 1.0 --weight_decay 1e-5 --lr 1e-4 --use_wandb --download=True
 ```
 
+#### Waterbirds, ViT-L/14@336px backbone
+
+- $L_{lc}+L_{vc}+L_{ls}$
+```
+python run_expt.py --dataset waterbirds --algorithm Multimodal --model clip-vit --root_dir data --device 0 --freeze_vision --freeze_language --train_projection --seed 11111111 --batch_size 32 --n_epochs 300 --class_weight 0.0 --clip_weight 1.0 --image_weight 1.0 --language_weight 1.0 --domain_weight 0.0 --spurious_weight 1.0 --spurious_class_weight 0.0 --spurious_clip_weight 0.0 --crossmodal_weight 0.0 --pos_weight 1.0 --neg_weight 1.0 --weight_decay 1e-5 --lr 1e-4 --use_wandb --download=True
+```
+
+- $L_{lc}+L_{vc}+L_{vs}$
+```
+python run_expt.py --dataset waterbirds --algorithm Multimodal --model clip-vit --root_dir data --device 0 --freeze_vision --freeze_language --train_projection --seed 11111111 --batch_size 32 --n_epochs 300 --class_weight 0.0 --clip_weight 1.0 --image_weight 1.0 --language_weight 1.0 --domain_weight 0.0 --spurious_weight 0.0 --spurious_class_weight 1.0 --spurious_clip_weight 0.0 --crossmodal_weight 0.0 --pos_weight 1.0 --neg_weight 1.0 --weight_decay 1e-5 --lr 1e-4 --use_wandb --download=True
+```
 
 ## References
 * [WILDS](https://github.com/p-lambda/wilds)
